@@ -1,0 +1,150 @@
+This is PTT V1.4 (C) 2015 Steve McCarter, KB4OID. PTT is a simple C 
+program that will activate a control line on a serial port based on
+specified parameters. It will then exit the program, leaving the control 
+line in the specified state. It is the normal behavior of this program to 
+ignore and not change the state of control lines on the same serial 
+port that are not specified. This program is useful for controlling the
+Push-To-Talk line of an external radio connected to a control pin of 
+the serial port, hence the name ptt. 
+
+PTT can be used as follows:
+
+For versions less than 1.4 the following usage is valid.
+   Usage is "./ptt port_number ctrl_line value"
+
+   Where:
+   port_number is 0-3 for ttyS0-ttyS3 (4-7 for v1.3)
+   ctrl_line is 0 for DTR and 1 for RTS
+   value is 0 or 1 for ON or OFF
+
+For versions 1.4 and up the following command line arguments are valid
+   ptt [-p port_number] or [-d devicename] [-l ctrl_line] 
+   [-f config file] value
+
+   Where:
+   port_number is 0-3 for ttyS0-ttyS3
+   devicename is /dev/ttyS0 or somesuch
+   ctrl_line is 0 for DTR and 1 for RTS
+   value is 0 or 1 for ON or OFF
+   -D is a synonym for -l 0 (DTR)
+   -R is a synonym for -l 1 (RTS)
+
+Configuration Items:
+The configuration file for the PTT (added in V1.4 and later) will allow 
+the user to pre-specify implementations by encoding them in configuration
+files. When ptt is run with the -F switch, the specified configuration 
+file is loaded and parsed to determine what port, control line, state and 
+action are desired. With this mechanism, it is much easier to implement
+complicated actions which may require more than one control line to change 
+its state simultaneously.
+
+There two types of sections to the configuration file, the LINES section, 
+and the indivdual line config sections. In the LINES section, the number 
+of lines to be specified is defined and the section name labels for each
+line are defined. 
+
+For each line defined in the LINES section, there is a matchine line 
+definition section. This section is named as per the line label specified 
+in the LINES section. There are seven possible attributes than can be 
+specified for each line section, name, port, line, dir, state, level, 
+and action. The name attribute defines a human readable label to be 
+associated with this line specification. The port attribute specifies the 
+serial port to be used. The line attribute specifies the control line to 
+be defined. The dir attributes specifies the I/O port directions (always 
+OUT for ptt control lines). The state attribute defines the end state the 
+control line should end up in. The level defines wether the control line 
+is acting in phase or inverted to it's control stimulus. And finally, the 
+action attribute will define what actions would be taken upon successful 
+receipt.
+
+Line definition section, headed by section name as called out in 
+LINES section, in braces. 
+
+name	Free entry text field with name of line, e.g. "Icom #1 PTT"
+
+port	Comm port number, one of the following choices: 0|1|2|3
+	0 - /dev/ttyS0 (COMM1)
+	1 - /dev/ttyS1 (COMM2)
+	2 - /dev/ttyS2 (COMM3)
+	3 - /dev/ttyS3 (COMM4)
+
+line	Which control line is this definition about. Should be one of the 
+	following choices: NONE|RTS|DTR|BOTH
+
+	NONE - Neither line
+	RTS - The Request To Send control line 
+	DTR - The Data Terminal Ready control line
+	BOTH - Both the DTR and RTS lines
+
+dir	Control line direction, input, output or bidirectionsl, should be
+	one of the following choices: OUT|IN|BI
+
+	OUT - Control Line is an output (DTR or RTS)
+	IN -  Control line is an inout (DSR, DCD or CTS)
+	BI - Control line is bidirectional
+
+state	What state the line should be in at the conclusion of this action.
+	Should be one of the following choices: OFF|ON|TOGGLE|PTT|COR|IGNORE
+	
+	OFF - Line stays LOW all the time
+	ON - Line Stays HIGH all the time
+	TOGGLE - Line changes to opposite state of what it currently is
+	PTT - Line follows PTT control input from Command Line
+	COR - Line cause COR to follow line input value
+	IGNORE - Causes line to not change 
+
+level	What level state is active, NORMAL or INVERT. Invert will cause
+	all actions to assume the opposite state of NORMAL. e.g. if line
+	state is set to PTT then when PTT in is 1, then line assumes 0 and
+	vice versa. Allows for negative keying and so on.
+
+action	What action should be taken (inactive at this time)
+
+Configuration Examples
+
+PTT on DTR of Com1 (ttyS0)
+[LINES]
+lines=1
+line1=LINE1
+[LINE1]
+name=ICOM PTT
+port=0
+line=DTR
+dir=OUT
+state=PTT
+
+[LINES]
+lines=3
+line1=LINE1
+line2=LINE2
+line3=BOOGA
+[LINE1]
+name=ICOM PTT
+port=0
+line=DTR
+dir=OUT
+state=PTT
+level=NORMAL
+[LINE2]
+name=Neutral
+port=0
+line=RTS
+dir=OUT
+state=OFF
+level=NORMAL
+[BOOGA]
+name=Bogus Entry
+port=1
+line=NONE
+dir=BI
+state=OFF
+level=INVERT
+[SectionName]
+name=Neutral
+port=0|1|2|3
+line=RTS|DTR|NONE|BOTH
+dir=OUT|IN|BI
+state=OFF|ON|PTT|COR|IGNORE
+action=?
+level=NORMAL|INVERT
+

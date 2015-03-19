@@ -29,8 +29,8 @@
  * Project: None
  * Date Created: September 2009
  * Revised: September 2013
- * Last Revised: October 2014
- * Version: 1.3
+ * Last Revised: March 2015
+ * Version: 1.4
  *
  */
 
@@ -42,6 +42,8 @@
 #include <time.h>
 #include <errno.h>
 #include <sys/ioctl.h>
+#include <getopt.h>
+#include "ini.h"
 
 /* This define will select whether we wish to compile using sys/io.h or
  * sys/asm.h. Which you use will likely depend on system architecture.
@@ -82,7 +84,6 @@
 
 //#define VERBOSE_PRINT FALSE
 #define VERBOSE_PRINT TRUE
-
 #define SILENT_MODE FALSE
 
 #define DTR_MASK 	1		// Bit 0: 2^0
@@ -117,26 +118,147 @@ int MCR_ADDR_OFFSET = 0x04;
 //int IO_MASK = 0x3FF;
 int IO_MASK = 0xFFFF;
 
+#define DEF_DEVICENAME "/dev/ttyS0"
+#define DEF_LINENAME "BOTH"
+#define DEF_CFGFILE "ptt.conf"
+#define DEF_PORTNUM 0
+
 #define MINOR_VER 3
 #define MAJOR_VER 1
-#define COPY_YEARS "2009-2013"
+#define COPY_YEARS "2009-2015"
 
-void prt_hdr()
+static int verbose;
+static int quiet;
+static int debug;
+int port_number;            // The specified serial port number 0-3
+char * devicename;
+char * linename;
+char * cfgfile;
+
+static int handler(void* user, const char* section, const char* name, const char* value);
+int load_config(char * cfile);
+void prt_hdr(char * name);
+void copyright(void);
+void version(char * name);
+void usage(char * name);
+void print_line_state(int bit_mask, int value);
+void parse_args(int argc, char *argv[]);
+
+typedef struct
 {
-    printf("PTT V%d.%d (C) %s Steve McCarter, KB4OID\n",MAJOR_VER,MINOR_VER,COPY_YEARS);
+	int verbose;					// Verbose Reporting {0|1} {OFF|ON}
+	int debug;						// Debug reporting {0|1} {OFF|ON}
+	int level;						// Debug level {0|5}
+	int port_number;						// Debug level {0|5}
+    const char* devicename;			// serial device name
+    const char* linename;			// serial device name
+
+} configuration;
+
+
+/* This function will match section and name to sets specified below to parse
+ * an ini file line into it's value. This value is stored in the configuration*
+ * structure. From the 'ini' file lib.
+ */
+static int handler(void* user, const char* section, const char* name, const char* value)
+{
+    configuration* pconfig = (configuration*)user;
+
+    #define MATCH(s, n) strcmp(section, s) == 0 && strcmp(name, n) == 0
+    if (MATCH("DEBUG", "Debug")) {
+        pconfig->debug = atoi(value);
+    } else if (MATCH("DEBUG", "Verbose")) {
+        pconfig->verbose = atoi(value);
+    } else if (MATCH("DEBUG", "Level")) {
+        pconfig->level = atoi(value);
+    } else if (MATCH("Devices", "DeviceName")) {
+        pconfig->devicename = strdup(value);
+    } else if (MATCH("Devices", "LineName")) {
+        pconfig->cardreader_baud = strdup(value);
+    } else if (MATCH("Devices", "PortNumber")) {
+        pconfig->cardreader_set = strdup(value);
+    } else if (MATCH("LINES", "Lines")) {
+        pconfig->numlines = atoi(value);
+    } else {
+        return 0;  /* unknown section/name, error */
+    }
+    return 1;
 }
 
-void usage()
+/* This function accomplishes the loading of the ini file into the configuration */
+int load_config(char * cfile)
 {
+	configuration config;
+	char * p;
 
-    printf("   Usage is \"./ptt <port_number> <ctrl_line> <value>\"\n") ;
-    printf("   \n") ;
-    printf("   Where:\n") ;
-    printf("   <port_number> is 0-3 for ttyS0-ttyS3\n") ;
-    printf("   <ctrl_line> is '0' for DTR, '1' for RTS, '2' for both\n") ;
-    printf("   <value> is '0' or '1' for ON or OFF\n") ;
-    exit( -1) ;
+	if (ini_parse(cfile, handler, &config) < 0) {
+		printf("Can't load '%s'\n",cfile);
+		return(ERROR);
+	}
+	printf("Config loaded from '%s':\n", cfile);
 
+	//printf("name=%s\n", config.name);
+
+	debug = config.debug;
+	verbose = config.verbose;
+	level = config.level;
+
+	if (config.cardreader_port != "")
+		strcpy(devicename,config.cardreader_port);
+
+	if (debug)
+		printf("devicename: '%s'\n",devicename);
+
+	if (config.cardreader_set != "")
+		strcpy(device_settings,config.cardreader_set);
+
+	if (debug)
+		printf("device_settings: '%s'\n",device_settings);
+
+	p = strtok(strdup(config.cardreader_set),",");
+	if (debug)
+		printf("p: '%s'\n",p);
+	if (p != NULL)
+		baudrate = getBaudRateIndex(atoi(p));
+
+	if (debug)
+		printf("baudrate: '%s' (%d)\n",getBaudRateName(baudrate),baudrate);
+
+	if (config.cardreader_baud != "")
+		baudrate = getBaudRateIndex(atoi(config.cardreader_baud));
+
+	if (verbose)
+		printf("baudrate: '%s' (%d)\n",getBaudRateName(baudrate),baudrate);
+
+	return(PASS);
+}
+
+void prt_hdr(char * name)
+{
+    printf("%s V%d.%d\n",name,MAJOR_VER,MINOR_VER);
+}
+
+void copyright(void)
+{
+    printf("Copyright (C) %s KB4OID Labs, a division of Kodetroll Heavy Industries\n",COPY_YEARS);
+}
+
+void version(char * name)
+{
+    printf("This %s Version %d.%d (C) %s\n",name,MAJOR_VER,MINOR_VER,COPY_YEARS);
+}
+
+void usage(char * name)
+{
+	printf("\n");
+	printf("Usage is %s [options] <value>\n",name);
+	printf("\n");
+	printf("Where:\n");
+	printf("  --port, -p <port>           Serial port number [0-7]\n");
+	printf("  --device, -d  <devicename>  Serial device name, e.g '/dev/ttyS0'\n");
+	printf("  --line, -l <ctrl_line>      Line to control [DTR:0, RTS:1, BOTH:0] \n");
+	printf("  --file, -f <config file>    Use alternate config file\n");
+    printf("  <value> is '0' or '1' for ON or OFF\n") ;
 }
 
 void print_line_state(int bit_mask, int value)
@@ -147,36 +269,175 @@ void print_line_state(int bit_mask, int value)
         printf("OFF, ");
 }
 
+void load_config(void)
+{
+
+}
+
+void parse_args(int argc, char *argv[])
+{
+
+}
+
 int main(int argc, char *argv[])
 {
-    int port_number;            // The specified serial port number 0-3
     int port_address;		    // The serial port base I/O port address
     unsigned char old_value;	// The original value of the MCR register
     unsigned char new_value;	// The new value of the MCR register
     unsigned char value;		// The specified state ON or OFF
     unsigned char ctrl_line;	// The specified line to ctrl (DTR or RTS)
+    int c;
+
+    debug = ON;
+    verbose = OFF;
+    quiet = OFF;
+
+    devicename = strdup(DEF_DEVICENAME);
+    linename = strdup(DEF_LINENAME);
+    cfgfile = strdup(DEF_CFGFILE);
+    port_number = DEF_PORTNUM;
 
 	/* start with 'DTR only' control assigned */
     ctrl_line = CTRL_DTR;
 
-    prt_hdr();
+	if (!quiet)
+	{
+    	prt_hdr(argv[0]);
+    	copyright();
+	}
 
-    /* Ensure that the user has supplied exactly three parameters 
-     * (argc = 4) supplied to the program on the command line. If not, 
-     * then print usage and exit.
-     */
-    if (argc != 4)
-        usage();
+	/* Load defaults from ini config file */
+	load_config();
 
-    /* Grab the tty port number from the command line args. Convert the 
-     * ASCII char from the command line to it's integer form.
-     */
-    port_number = atoi( argv[1]);
+	/* Parse command line arguments */
+	//parse_args(argc,argv);
 
-    /* Determine which control line to activate, by generating a 
-     * boolean value from the input value supplied by the operator.
-     */
-    ctrl_line = atoi( argv[2]) & 0x03;
+	while (1)
+	{
+		static struct option long_options[] =
+		{
+			/* These options set a flag. */
+			{"verbose", no_argument,   &verbose, 1},
+			{"brief",   no_argument,   &verbose, 0},	// default
+			{"debug",   no_argument,     &debug, 1},
+			{"nodebug",   no_argument,   &debug, 0},	// default
+			{"quiet",   no_argument,     &quiet, 1},
+			{"unquiet", no_argument,     &quiet, 0},	// default
+			/* These options don’t set a flag.
+			   We distinguish them by their indices. */
+			{"help",     no_argument,       0, 'h'},
+			{"version",  no_argument,       0, 'v'},
+			{"device",   required_argument, 0, 'd'},
+			{"port",     required_argument, 0, 'p'},
+			{"line",     required_argument, 0, 'l'},
+			{"file",     required_argument, 0, 'f'},
+			{0, 0, 0, 0}
+		};
+		/* getopt_long stores the option index here. */
+		int option_index = 0;
+
+		c = getopt_long (argc, argv, "hvd:p:l:f:",
+				long_options, &option_index);
+
+		/* Detect the end of the options. */
+		if (c == -1)
+			break;
+
+		switch (c)
+		{
+			case 0:
+				/* If this option set a flag, do nothing else now. */
+				if (long_options[option_index].flag != 0)
+					break;
+				printf ("option %s", long_options[option_index].name);
+				if (optarg)
+					printf (" with arg %s", optarg);
+				printf ("\n");
+				break;
+
+			case 'v':
+				version(argv[0]);
+				exit(1);
+				break;
+
+			case 'h':
+				usage(argv[0]);
+				exit(1);
+				break;
+
+			case 'd':
+				printf ("option -d with value `%s'\n", optarg);
+				devicename = strdup(optarg);
+				break;
+
+			case 'p':
+				printf ("option -p with value `%s'\n", optarg);
+				port_number = atoi(optarg);
+				break;
+
+			case 'l':
+				printf ("option -l with value `%s'\n", optarg);
+				linename = strdup(optarg);
+				break;
+
+			case 'f':
+				printf ("option -f with value `%s'\n", optarg);
+				cfgfile = strdup(optarg);
+				break;
+
+			case '?':
+				/* getopt_long already printed an error message. */
+				break;
+
+			default:
+				abort ();
+		}
+	}
+
+	/* Instead of reporting ‘--verbose’
+	and ‘--brief’ as they are encountered,
+	we report the final status resulting from them. */
+	if (verbose)
+		puts ("verbose flag is set");
+	if (quiet)
+		puts ("quiet flag is set");
+	if (debug)
+		puts ("debug flag is set");
+
+	/* Print any remaining command line arguments (not options). */
+	if (optind < argc)
+	{
+		printf ("non-option ARGV-elements: ");
+		while (optind < argc)
+			printf ("%s ", argv[optind++]);
+		putchar ('\n');
+	}
+
+	if (debug)
+	{
+		printf("Port Number: %d\n",port_number);
+		printf("devicename: '%s'\n",devicename);
+		printf("linename: '%s'\n",linename);
+		printf("cfgfile: '%s'\n",cfgfile);
+	}
+
+	exit(0);
+//    /* Ensure that the user has supplied exactly three parameters
+//     * (argc = 4) supplied to the program on the command line. If not,
+//     * then print usage and exit.
+//     */
+//    if (argc != 4)
+//        usage(argv[0]);
+//
+//    /* Grab the tty port number from the command line args. Convert the
+//     * ASCII char from the command line to it's integer form.
+//     */
+//    port_number = atoi( argv[1]);
+//
+//    /* Determine which control line to activate, by generating a
+//     * boolean value from the input value supplied by the operator.
+//     */
+//    ctrl_line = atoi( argv[2]) & 0x03;
 
     /* Based on the provided port number, select the IO base address
      * of the serial port to be controlled. Any thing other that
@@ -206,21 +467,21 @@ int main(int argc, char *argv[])
     }
 
     /* Show the BASE COM Port address based on the port number */
-    if (VERBOSE_PRINT == TRUE)
+    if (verbose)
         printf("COMM Port base address: 0x%024X\n",port_address);
 
     /* Add the MCR OFFSET to BASE address to find the MCR address */
     port_address += MCR_ADDR_OFFSET;
 
     /* Show the MCR register Address */
-    if (VERBOSE_PRINT == TRUE)
+    if (verbose)
         printf("COMM Port MCR Register address: 0x%02X\n",port_address);
 
     /* Apply the IO MASK to generate the final IO address */
     port_address &= IO_MASK;
 
     /* Show the final MCR Register address */
-    if (VERBOSE_PRINT == TRUE)
+    if (verbose)
         printf("COMM Port MCR Register address: 0x%02X\n",port_address);
 
     /* If the port_address is less than 0x3FF, then we do a simple ioperm()
@@ -236,10 +497,10 @@ int main(int argc, char *argv[])
     old_value = inb( port_address );
 
     /* Show this value to the operator */
-    if (VERBOSE_PRINT == TRUE)
+    if (verbose)
         printf("Initial Value: 0x%02X\n",old_value);
 
-    if (VERBOSE_PRINT == TRUE)
+    if (verbose)
 		if ((old_value & UPPER_MCR_MASK) > 0)
 			printf("Warning, MCR Initial Value indicates no UART present\n");
 
@@ -270,7 +531,7 @@ int main(int argc, char *argv[])
     value = atoi( argv[3]) & 0x01;
 
     /* Show this to the operator */
-    if (VERBOSE_PRINT == TRUE)
+    if (verbose)
     {
 		switch(ctrl_line)
 		{
@@ -341,7 +602,7 @@ int main(int argc, char *argv[])
     new_value = MCR_MASK & new_value;
 
     /* Show this to the operator */
-    if (VERBOSE_PRINT == TRUE)
+    if (verbose)
         printf("New Value: 0x%02X\n",new_value);
 
     /* Send the new value to the MCR */
@@ -351,11 +612,11 @@ int main(int argc, char *argv[])
     new_value = inb( port_address );
 
     /* Show the read back value to the operator */
-    if (VERBOSE_PRINT == TRUE)
+    if (verbose)
         printf("New Value: 0x%02X\n",new_value);
 
     /* Show the operator the end result! */
-    if (SILENT_MODE == FALSE)
+    if (!quiet)
     {
 		switch(ctrl_line)
 		{

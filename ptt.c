@@ -1,23 +1,36 @@
-/* ptt.c - This program will set a control line on a serial comm
- * to s specified state (ON or OFF) for the purpose of controlling
- * a radio attached to the serial port through a keying interface.
- * This program will take parameters from the command line and parse
- * these to determine what serial port and what state is desired. The
- * program works by calculating the IO base address of the specified
- * serial port, then adding the MCR register offset to this value. It
- * will then do an ioperms call to allow the user space program to
- * have access to the IO port. The program will then read the MCR
- * register of the desired serial comm port, mask off and set the
- * MCR register bit corresponding to the configured port control line
- * as specified on the command line. It then writes the modified value
- * back to the MCR register, thus affecting the output control line
- * state. It then exits. This program is really more of a proof-of-concept
- * program to demonstrate low level access to the i/o ports.
+/* ptt.c - This is a program that is intended to set a control line
+ * (DTR or RTS) on a serial comm port to a specified state (ON or OFF),
+ * for the purpose of controlling a radio (or other device) attached to
+ * the serial port through a keying interface. It will take parameters
+ * from the command line and parse them to determine what serial port,
+ * control lines, and what state is desired. it will then set the
+ * specified serial port control pins to the desired state and
+ * exit, leaving the control pins in that state.
  *
- * Author: Steve McCarter, KB4OID
- * Date: September 2009
+ * Note: This program is only intended to work with classic legacy
+ * 8250 based serial port hardware. It may work with other serial port
+ * interfaces, perhaps MOS Chips or similar style hardware. However,
+ * the serial port device must support 8250 style IO register access
+ * and have the control pins mapped to the same locations as in an 8250.
+ *
+ * The program works by calculating the IO base address of the specified
+ * serial port, then adding the MCR register offset to this value. It
+ * will then do an ioperms call to allow the user space program to have
+ * access to the IO port. The program will then read the MCR register
+ * of the desired serial comm port, mask off and set the MCR register
+ * bit corresponding to the configured port control line as specified
+ * on the command line. It then writes the modified value back to the
+ * MCR register, thus affecting the output control line state. It then
+ * exits. This program is really more of a proof-of-concept program to
+ * demonstrate low level access to the i/o ports.
+ *
+ * (C) KB4OID Labs, a division of Kodetroll Heavy Industries
+ * Author: Kodetroll (Steve McCarter, KB4OID)
+ * Project: None
+ * Date Created: September 2009
  * Revised: September 2013
- * Version: 1.2
+ * Last Revised: October 2014
+ * Version: 1.3
  *
  */
 
@@ -30,6 +43,9 @@
 #include <errno.h>
 #include <sys/ioctl.h>
 
+/* This define will select whether we wish to compile using sys/io.h or
+ * sys/asm.h. Which you use will likely depend on system architecture.
+ */
 #define HAVE_SYS_IO_H
 
 #ifdef HAVE_SYS_IO_H
@@ -42,17 +58,48 @@
     #endif
 #endif
 
+// Define some boolean states.
 #define TRUE    1
 #define FALSE   0
 
+#define ON 		1
+#define OFF 	0
+
+/* define the number of consecutive registers to apply the ioperm command to.
+ * MCR_REG_ONLY ioperms the MCR only, while WHOLE_UART would apply to the
+ * whole 3 bit io address space (base reg addr must be set appropriately)
+ */
+#define MCR_REG_ONLY 1
+#define WHOLE_UART 8
+
+/* If VERBOSE_PRINT is set to TRUE, then various debug statements will
+ * be enabled and much info (hence the verbose tag) will be printed to
+ * the screen during execution. If this app is being used in a script
+ * of some kind that is running un-attended, then this verbose level of
+ * detail may be interesting. otherwise, not so much, so turn it off.
+ * This is currently not selectable at run time, sorry!
+ */
+
 //#define VERBOSE_PRINT FALSE
 #define VERBOSE_PRINT TRUE
+
 #define SILENT_MODE FALSE
 
+#define DTR_MASK 	1		// Bit 0: 2^0
+#define RTS_MASK 	2		// Bit 1: 2^1
+
+#define MCR_MASK 	0x03	// Mask off all but lower 2 bits of MCR
+
+#define UPPER_MCR_MASK 	0xC0	// Mask off all but upper 2 bits of MCR
+
+/* define which pins will be used to control PTT, choices are
+ * NONE, DTR only, RTS only or BOTH.
+ */
 enum {
-    CTRL_DTR,
-    CTRL_RTS,
-    CTRL_BOTH
+    CTRL_NONE,	// Use none to control PTT
+    CTRL_DTR,	// Use only DTR to control PTT
+    CTRL_RTS,	// Use only RTS to control PTT
+    CTRL_BOTH	// Use both RTS & DTR to control PTT
 };
 
 /* MCR_OFFSET is the register address offset of the MCR
@@ -70,25 +117,13 @@ int MCR_ADDR_OFFSET = 0x04;
 //int IO_MASK = 0x3FF;
 int IO_MASK = 0xFFFF;
 
-/* CTRL_BIT is the bit number of the desired port line
- * to be controlled. This is expressed as the shift amount
- * required to create CTRL_MASK. See the following:
- *     DTR: 0x00 (BIT 0),
- *     RTS: 0x01 (BIT 1)
- *     BOTH: 0x02 (BIT 0 & 1)
- */
-int CTRL_BIT = 0x00;
-
-/* This value starts as 00000001 and is then LEFT shifted
- * by CTRL_BIT bits. The resulting value is used as the
- * mask to affect changes only on the desired bit in the
- * MCR.
- */
-unsigned char CTRL_MASK = 0x01;
+#define MINOR_VER 3
+#define MAJOR_VER 1
+#define COPY_YEARS "2009-2013"
 
 void prt_hdr()
 {
-    printf("PTT V1.2 (C) 2009 Steve McCarter, KB4OID\n");
+    printf("PTT V%d.%d (C) %s Steve McCarter, KB4OID\n",MAJOR_VER,MINOR_VER,COPY_YEARS);
 }
 
 void usage()
@@ -104,6 +139,14 @@ void usage()
 
 }
 
+void print_line_state(int bit_mask, int value)
+{
+    if ((bit_mask & value) == bit_mask)
+        printf("ON, ");
+    else
+        printf("OFF, ");
+}
+
 int main(int argc, char *argv[])
 {
     int port_number;            // The specified serial port number 0-3
@@ -113,32 +156,38 @@ int main(int argc, char *argv[])
     unsigned char value;		// The specified state ON or OFF
     unsigned char ctrl_line;	// The specified line to ctrl (DTR or RTS)
 
+	/* start with 'DTR only' control assigned */
     ctrl_line = CTRL_DTR;
 
     prt_hdr();
 
-    /* Ensure that the user has supplied exactly three
-     * parameters supplied to the program on the command
-     * line. If not, then print usage and exit.
+    /* Ensure that the user has supplied exactly three parameters 
+     * (argc = 4) supplied to the program on the command line. If not, 
+     * then print usage and exit.
      */
     if (argc != 4)
         usage();
 
-    /* Convert the ASCII char from the command line to it's integer form */
+    /* Grab the tty port number from the command line args. Convert the 
+     * ASCII char from the command line to it's integer form.
+     */
     port_number = atoi( argv[1]);
 
-    /* Generate a boolean value from the operator
-     * supplied input value
+    /* Determine which control line to activate, by generating a 
+     * boolean value from the input value supplied by the operator.
      */
-    ctrl_line = atoi( argv[2]) & 0x01;
+    ctrl_line = atoi( argv[2]) & 0x03;
 
-    /* Based on the port number (0-3), select the IO base address */
+    /* Based on the provided port number, select the IO base address
+     * of the serial port to be controlled. Any thing other that
+     * 0-3 may not work and is dependant on specific hardware.
+     */
     switch (port_number)
     {
-        case 0: port_address = 0x3F8; break;
-        case 1: port_address = 0x2F8; break;
-        case 2: port_address = 0x3E8; break;
-        case 3: port_address = 0x2E8; break;
+		case 0: port_address = 0x3F8; break;
+		case 1: port_address = 0x2F8; break;
+		case 2: port_address = 0x3E8; break;
+		case 3: port_address = 0x2E8; break;
 		case 4: port_address = 0xec98; break;
 		case 5: port_address = 0xdcc0; break;
 		case 6: port_address = 0xdcc8; break;
@@ -147,10 +196,13 @@ int main(int argc, char *argv[])
 		default: port_address = 0x3F8; break;
     }
 
+	/* Setup the default control pin BIT map */
     switch(ctrl_line)
     {
-        case CTRL_DTR: CTRL_BIT = 0x00; break;      // DTR: 0x00 (BIT 0),
-        case CTRL_RTS: CTRL_BIT = 0x01; break;      // RTS: 0x01 (BIT 1)
+        case CTRL_NONE: printf("ptt mode is CTRL_NONE\n"); break;	// DTR: 0, RTS: 0 -> 0x00
+        case CTRL_DTR: printf("ptt mode is CTRL_DTR\n"); break;		// DTR: 0, RTS: 1 -> 0x01
+        case CTRL_RTS: printf("ptt mode is CTRL_RTS\n"); break;		// DTR: 1, RTS: 0 -> 0x02
+        case CTRL_BOTH: printf("ptt mode is CTRL_BOTH\n"); break;	// DTR: 1, RTS: 0 -> 0x03
     }
 
     /* Show the BASE COM Port address based on the port number */
@@ -175,7 +227,7 @@ int main(int argc, char *argv[])
      * action to set the perms on the ioport so that the user can change
      * the value in the MCR register.
      */
-    if (ioperm(port_address, 3, 1)!=0) {
+    if (ioperm(port_address, MCR_REG_ONLY, ON)!=0) {
         error ("ptt: ioperm(0x%x) failed: %s", port_address, strerror(errno));
         return -1;
     }
@@ -187,27 +239,30 @@ int main(int argc, char *argv[])
     if (VERBOSE_PRINT == TRUE)
         printf("Initial Value: 0x%02X\n",old_value);
 
-    /* Show the initial value of CTRL_MASK */
     if (VERBOSE_PRINT == TRUE)
-        printf("CTRL_MASK: 0x%02X\n",CTRL_MASK);
-
-    /* Create the correct CTRL Bit MASK value */
-    CTRL_MASK <<= CTRL_BIT;
-
-    /* Show this to the operator */
-    if (VERBOSE_PRINT == TRUE)
-        printf("CTRL_MASK: 0x%02X\n",CTRL_MASK);
+		if ((old_value & UPPER_MCR_MASK) > 0)
+			printf("Warning, MCR Initial Value indicates no UART present\n");
 
     switch(ctrl_line)
     {
-        case CTRL_DTR: printf("PTT (DTR) was: "); break;
-        case CTRL_RTS: printf("PTT (RTS) was: "); break;
+        case CTRL_NONE:
+			break;
+        case CTRL_DTR:
+			printf("PTT (DTR) was: ");
+			print_line_state(DTR_MASK,old_value);
+			break;
+        case CTRL_RTS:
+			printf("PTT (RTS) was: ");
+			print_line_state(RTS_MASK,old_value);
+			break;
+        case CTRL_BOTH:
+			printf("PTT (DTR) was: ");
+			print_line_state(DTR_MASK,old_value);
+			printf("PTT (RTS) was: ");
+			print_line_state(RTS_MASK,old_value);
+			break;
     }
-
-    if (CTRL_MASK && old_value == CTRL_MASK)
-        printf("ON, ");
-    else
-        printf("OFF, ");
+    printf("\n");
 
     /* Generate a boolean value from the operator
      * supplied input value
@@ -216,15 +271,74 @@ int main(int argc, char *argv[])
 
     /* Show this to the operator */
     if (VERBOSE_PRINT == TRUE)
-        printf("Desired Value: 0x%02X\n",value);
+    {
+		switch(ctrl_line)
+		{
+			case CTRL_NONE:
+				printf("Desired Value: DTR NOT CHANGED\n");
+				printf("Desired Value: RTS NOT CHANGED\n");
+				break;
+			case CTRL_DTR:
+				if (value == ON)
+					printf("Desired Value: DTR ON\n");
+				else
+					printf("Desired Value: DTR OFF\n");
+				printf("Desired Value: RTS NOT CHANGED\n");
+				break;
+			case CTRL_RTS:
+				printf("Desired Value: DTR NOT CHANGED\n");
+				if (value == ON)
+					printf("Desired Value: RTS ON\n");
+				else
+					printf("Desired Value: RTS OFF\n");
+				break;
+			case CTRL_BOTH:
+				if (value == ON)
+				{
+					printf("Desired Value: DTR ON\n");
+					printf("Desired Value: RTS ON\n");
+				}
+				else
+				{
+					printf("Desired Value: RTS OFF\n");
+					printf("Desired Value: DTR OFF\n");
+				}
+				break;
+		}
+	}
 
     /* Modify the initial value of the MCR
-    * based on the CTRL_MASK
-    */
-    if (value == 1)
-        new_value = CTRL_MASK | old_value;
-    else
-        new_value = (~CTRL_MASK) & old_value;
+     * based on the desired control configuration
+     */
+    switch(ctrl_line)
+    {
+        case CTRL_NONE:
+			break;
+        case CTRL_DTR:
+			if (value == ON)
+				new_value = DTR_MASK | old_value;
+			else
+				new_value = (~DTR_MASK) & old_value;
+			break;
+        case CTRL_RTS:
+			if (value == ON)
+				new_value = RTS_MASK | old_value;
+			else
+				new_value = (~RTS_MASK) & old_value;
+			break;
+        case CTRL_BOTH:
+			if (value == ON)
+				new_value = DTR_MASK | old_value;
+			else
+				new_value = (~DTR_MASK) & old_value;
+			if (value == ON)
+				new_value = RTS_MASK | old_value;
+			else
+				new_value = (~RTS_MASK) & old_value;
+			break;
+    }
+
+    new_value = MCR_MASK & new_value;
 
     /* Show this to the operator */
     if (VERBOSE_PRINT == TRUE)
@@ -240,24 +354,43 @@ int main(int argc, char *argv[])
     if (VERBOSE_PRINT == TRUE)
         printf("New Value: 0x%02X\n",new_value);
 
-    /* Mask off the CTRL'd BIT */
-    new_value &= CTRL_MASK;
-
-    /* Convert it to a integer 0 or 1 */
-    new_value >>= CTRL_BIT;
-
     /* Show the operator the end result! */
     if (SILENT_MODE == FALSE)
     {
-        if (new_value == 1)
-            printf("PTT now: ON!\n");
-        else
-            printf("PTT now: OFF!\n");
+		switch(ctrl_line)
+		{
+			case CTRL_NONE:
+				break;
+			case CTRL_DTR:
+				if (new_value & DTR_MASK == DTR_MASK)
+					printf("PTT now: DTR ON!\n");
+				else
+					printf("PTT now: DTR OFF!\n");
+				break;
+			case CTRL_RTS:
+				if (new_value & RTS_MASK == RTS_MASK)
+					printf("PTT now: RTS ON!\n");
+				else
+					printf("PTT now: RTS OFF!\n");
+				break;
+			case CTRL_BOTH:
+				if (new_value & DTR_MASK == DTR_MASK)
+					printf("PTT now: DTR ON!\n");
+				else
+					printf("PTT now: DTR OFF!\n");
+				if (new_value & RTS_MASK == RTS_MASK)
+					printf("PTT now: RTS ON!\n");
+				else
+					printf("PTT now: RTS OFF!\n");
+				break;
+		}
+
     }
 
     /* Peace, out! */
     exit(0);
 }
+
 
 
 

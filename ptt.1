@@ -1,0 +1,63 @@
+.\"
+.\" Author: Steve, KB4OID <kb4oid@kb4oid.org>
+.\" Copyright (c) 2009-2014 KB4OID Labs
+.\"		All Rights Reserved
+.\"
+.Dd $Mdocdate: October 24 2014 $
+.Dt PTT 1
+.Sh NAME
+.Nm ptt 
+.Nd Push-To-Talk control a radio via serial port
+.Sh SYNOPSIS
+.Nm ptt
+.Bk -words
+.Op Ar port
+.Op Ar mode
+.Op Ar state
+.Ek
+.Sh DESCRIPTION
+.Nm
+Push-To-Talk control of external radio using a hardware serial port. It 
+will activate control line(s) (DTR or RTS) on a hardware serial port 
+based on parameters specified from the command line. It will then exit 
+the program, leaving the control line in the specified state. It is the 
+normal behavior of this program to ignore and not change the state of 
+control lines on the same serial port that are not specified. This 
+program is useful for controlling the Push-To-Talk line of an external 
+radio connected to a control pin of the serial port, hence the name ptt. 
+.Pp
+The program works by calculating the IO base address of the specified 
+serial port, then adding the MCR register offset to this value. It 
+will then do an ioperms call to allow the user space program to have 
+access to the IO port. The program will then read the MCR register 
+of the desired serial comm port, mask off and set the MCR register 
+bit corresponding to the configured port control line as specified 
+on the command line. It then writes the modified value back to the 
+MCR register, thus affecting the output control line state. It then 
+exits. This program is really more of a proof-of-concept program to 
+demonstrate low level access to the I/O ports.
+.Pp
+The options are as follows:
+.Bl -tag -width Ds
+.It Ar port
+Specifies which serial port to use (0-3).
+.It Ar mode
+Specifies which control pin to use, 0 specifies NONE, 1 specifies DTR only,
+2 specifies RTS only and 3 specifies BOTH.
+.It Ar state
+Specifies which state the control pin will be changed to (0 for OFF,
+1 for ON).
+.Pp
+Note: This program is only intended to work with classic legacy 
+8250 based serial port hardware. It may work with other serial port
+interfaces, perhaps MOS Chips or similar style hardware. However,
+the serial port device must support 8250 style IO register access 
+and have the control pins mapped to the same locations as in an 8250.
+
+.Sh FILES
+No special files required.
+.Sh AUTHORS
+ptt is based on several example programs.
+.Pp
+ptt 1.3 release by Steve, KB4OID
+

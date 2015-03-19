@@ -17,7 +17,7 @@
  * Author: Steve McCarter, KB4OID
  * Date: September 2009
  * Revised: September 2013
- * Version: 0.99.2
+ * Version: 1.2
  *
  */
 
@@ -88,7 +88,7 @@ unsigned char CTRL_MASK = 0x01;
 
 void prt_hdr()
 {
-    printf("PTT V1.1 (C) 2009 Steve McCarter, KB4OID\n");
+    printf("PTT V1.2 (C) 2009 Steve McCarter, KB4OID\n");
 }
 
 void usage()
@@ -139,12 +139,12 @@ int main(int argc, char *argv[])
         case 1: port_address = 0x2F8; break;
         case 2: port_address = 0x3E8; break;
         case 3: port_address = 0x2E8; break;
-	case 4: port_address = 0xec98; break;
-	case 5: port_address = 0xdcc0; break;
-	case 6: port_address = 0xdcc8; break;
-	case 7: port_address = 0xdcd0; break;
-	case 8: port_address = 0xdcd8; break;
-	default: port_address = 0x3F8; break;
+		case 4: port_address = 0xec98; break;
+		case 5: port_address = 0xdcc0; break;
+		case 6: port_address = 0xdcc8; break;
+		case 7: port_address = 0xdcd0; break;
+		case 8: port_address = 0xdcd8; break;
+		default: port_address = 0x3F8; break;
     }
 
     switch(ctrl_line)

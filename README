@@ -49,3 +49,6 @@ The following command line arguments are valid:
    mode: is 0 for NONE, 1 for DTR only, 2 for 
 		RTS only & 3 for BOTH
    state: is 1 or 0 for ON or OFF
+
+
+This project moved to github, March 2015

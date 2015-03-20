@@ -41,6 +41,7 @@
 #include <fcntl.h>
 #include <time.h>
 #include <errno.h>
+#include <dlfcn.h>
 #include <sys/ioctl.h>
 #include <getopt.h>
 #include "ini.h"
@@ -66,6 +67,10 @@
 
 #define ON 		1
 #define OFF 	0
+
+#define PASS 1
+#define FAIL 0
+#define ERROR -1
 
 /* define the number of consecutive registers to apply the ioperm command to.
  * MCR_REG_ONLY ioperms the MCR only, while WHOLE_UART would apply to the
@@ -127,14 +132,18 @@ int IO_MASK = 0xFFFF;
 #define MAJOR_VER 1
 #define COPY_YEARS "2009-2015"
 
-static int verbose;
-static int quiet;
-static int debug;
+static int verbose;			// Verbose Reporting {0|1} {OFF|ON}
+static int quiet;			// Silent Output {0|1} {OFF|ON}
+static int debug;			// Debug reporting {0|1} {OFF|ON}
+static int level;			// Debug level {0|5}
 int port_number;            // The specified serial port number 0-3
-char * devicename;
-char * linename;
-char * cfgfile;
+unsigned char ctrl_line;	// The specified line to ctrl (DTR or RTS)
+int numlines;				// Number of lines to control
+char * devicename;			// serial device name
+char * linename;			// serial line name
+char * cfgfile;				// Config file name
 
+// Global Prototypes
 static int handler(void* user, const char* section, const char* name, const char* value);
 int load_config(char * cfile);
 void prt_hdr(char * name);
@@ -143,15 +152,21 @@ void version(char * name);
 void usage(char * name);
 void print_line_state(int bit_mask, int value);
 void parse_args(int argc, char *argv[]);
+char * getCtrlLineName(int cline);
+int getCtrlLine(char * line);
+int getPortNumber(char * portname);
 
 typedef struct
 {
 	int verbose;					// Verbose Reporting {0|1} {OFF|ON}
+	int quiet;						// Silent Output {0|1} {OFF|ON}
 	int debug;						// Debug reporting {0|1} {OFF|ON}
 	int level;						// Debug level {0|5}
-	int port_number;						// Debug level {0|5}
+	int port_number;				// The specified serial port number 0-3
+	unsigned char ctrl_line;		// The specified line to ctrl (DTR or RTS)
+	int numlines;					// Number of lines to control
     const char* devicename;			// serial device name
-    const char* linename;			// serial device name
+    const char* linename;			// serial line name
 
 } configuration;
 
@@ -169,14 +184,18 @@ static int handler(void* user, const char* section, const char* name, const char
         pconfig->debug = atoi(value);
     } else if (MATCH("DEBUG", "Verbose")) {
         pconfig->verbose = atoi(value);
+    } else if (MATCH("DEBUG", "Quiet")) {
+        pconfig->quiet = atoi(value);
     } else if (MATCH("DEBUG", "Level")) {
         pconfig->level = atoi(value);
-    } else if (MATCH("Devices", "DeviceName")) {
+    } else if (MATCH("DEVICES", "DeviceName")) {
         pconfig->devicename = strdup(value);
-    } else if (MATCH("Devices", "LineName")) {
-        pconfig->cardreader_baud = strdup(value);
-    } else if (MATCH("Devices", "PortNumber")) {
-        pconfig->cardreader_set = strdup(value);
+    } else if (MATCH("DEVICES", "LineName")) {
+        pconfig->linename = strdup(value);
+    } else if (MATCH("DEVICES", "ControlLine")) {
+        pconfig->ctrl_line = atoi(value);
+    } else if (MATCH("DEVICES", "PortNumber")) {
+        pconfig->port_number = atoi(value);
     } else if (MATCH("LINES", "Lines")) {
         pconfig->numlines = atoi(value);
     } else {
@@ -202,33 +221,41 @@ int load_config(char * cfile)
 	debug = config.debug;
 	verbose = config.verbose;
 	level = config.level;
+	quiet = config.quiet;
 
-	if (config.cardreader_port != "")
-		strcpy(devicename,config.cardreader_port);
+	if (config.devicename != "")
+		strcpy(devicename,config.devicename);
 
 	if (debug)
 		printf("devicename: '%s'\n",devicename);
 
-	if (config.cardreader_set != "")
-		strcpy(device_settings,config.cardreader_set);
+	port_number = getPortNumber(devicename);
+
+	if (config.linename != "")
+		strcpy(linename,config.linename);
 
 	if (debug)
-		printf("device_settings: '%s'\n",device_settings);
+		printf("linename: '%s'\n",linename);
 
-	p = strtok(strdup(config.cardreader_set),",");
+	ctrl_line = getCtrlLine(linename);
+
+	if (config.port_number != ERROR)
+		port_number = config.port_number;
+
 	if (debug)
-		printf("p: '%s'\n",p);
-	if (p != NULL)
-		baudrate = getBaudRateIndex(atoi(p));
+		printf("port_number: '%d'\n",port_number);
+
+	if (config.numlines != ERROR)
+		numlines = config.numlines;
 
 	if (debug)
-		printf("baudrate: '%s' (%d)\n",getBaudRateName(baudrate),baudrate);
+		printf("numlines: '%d'\n",numlines);
 
-	if (config.cardreader_baud != "")
-		baudrate = getBaudRateIndex(atoi(config.cardreader_baud));
+	if (config.ctrl_line != ERROR)
+		ctrl_line = config.ctrl_line;
 
-	if (verbose)
-		printf("baudrate: '%s' (%d)\n",getBaudRateName(baudrate),baudrate);
+	if (debug)
+		printf("ctrl_line: '%d'\n",ctrl_line);
 
 	return(PASS);
 }
@@ -256,7 +283,7 @@ void usage(char * name)
 	printf("Where:\n");
 	printf("  --port, -p <port>           Serial port number [0-7]\n");
 	printf("  --device, -d  <devicename>  Serial device name, e.g '/dev/ttyS0'\n");
-	printf("  --line, -l <ctrl_line>      Line to control [DTR:0, RTS:1, BOTH:0] \n");
+	printf("  --line, -l <ctrl_line>      Line to control [NONE, DTR, RTS, BOTH] \n");
 	printf("  --file, -f <config file>    Use alternate config file\n");
     printf("  <value> is '0' or '1' for ON or OFF\n") ;
 }
@@ -269,48 +296,9 @@ void print_line_state(int bit_mask, int value)
         printf("OFF, ");
 }
 
-void load_config(void)
-{
-
-}
-
 void parse_args(int argc, char *argv[])
 {
-
-}
-
-int main(int argc, char *argv[])
-{
-    int port_address;		    // The serial port base I/O port address
-    unsigned char old_value;	// The original value of the MCR register
-    unsigned char new_value;	// The new value of the MCR register
-    unsigned char value;		// The specified state ON or OFF
-    unsigned char ctrl_line;	// The specified line to ctrl (DTR or RTS)
     int c;
-
-    debug = ON;
-    verbose = OFF;
-    quiet = OFF;
-
-    devicename = strdup(DEF_DEVICENAME);
-    linename = strdup(DEF_LINENAME);
-    cfgfile = strdup(DEF_CFGFILE);
-    port_number = DEF_PORTNUM;
-
-	/* start with 'DTR only' control assigned */
-    ctrl_line = CTRL_DTR;
-
-	if (!quiet)
-	{
-    	prt_hdr(argv[0]);
-    	copyright();
-	}
-
-	/* Load defaults from ini config file */
-	load_config();
-
-	/* Parse command line arguments */
-	//parse_args(argc,argv);
 
 	while (1)
 	{
@@ -413,15 +401,145 @@ int main(int argc, char *argv[])
 		putchar ('\n');
 	}
 
+}
+
+char * getCtrlLineName(int cline)
+{
+
+	switch(cline)
+	{
+		case CTRL_NONE:
+			return("NONE");
+		case CTRL_DTR:
+			return("DTR");
+		case CTRL_RTS:
+			return("RTS");
+		case CTRL_BOTH:
+			return("BOTH");
+		case ERROR:
+		default:
+			return("ERROR");
+	}
+
+}
+
+int getCtrlLine(char * line)
+{
+
+	if (strcmp(line,"NONE") ==0)
+		return(CTRL_NONE);
+	else if (strcmp(line,"DTR") ==0)
+		return(CTRL_DTR);
+	else if (strcmp(line,"RTS") ==0)
+		return(CTRL_RTS);
+	else if (strcmp(line,"BOTH") ==0)
+		return(CTRL_BOTH);
+	else
+		return(ERROR);
+
+//    CTRL_NONE,	// Use none to control PTT
+//    CTRL_DTR,	// Use only DTR to control PTT
+//    CTRL_RTS,	// Use only RTS to control PTT
+//    CTRL_BOTH	// Use both RTS & DTR to control PTT
+
+}
+
+int getPortNumber(char * portname)
+{
+
+	if (strcmp(portname,"/dev/ttyS0") ==0)
+		return(0);
+	else if (strcmp(portname,"/dev/ttyS1") ==0)
+		return(1);
+	else if (strcmp(portname,"/dev/ttyS2") ==0)
+		return(2);
+	else if (strcmp(portname,"/dev/ttyS3") ==0)
+		return(3);
+	else if (strcmp(portname,"/dev/ttyS4") ==0)
+		return(4);
+	else if (strcmp(portname,"/dev/ttyS5") ==0)
+		return(5);
+	else if (strcmp(portname,"/dev/ttyS6") ==0)
+		return(6);
+	else if (strcmp(portname,"/dev/ttyS7") ==0)
+		return(7);
+	else
+		return(-1);
+
+}
+
+int getPortAddress(int portnum)
+{
+	int port_address;
+    switch (port_number)
+    {
+		case 0: port_address = 0x3F8; break;
+		case 1: port_address = 0x2F8; break;
+		case 2: port_address = 0x3E8; break;
+		case 3: port_address = 0x2E8; break;
+		case 4: port_address = 0xec98; break;
+		case 5: port_address = 0xdcc0; break;
+		case 6: port_address = 0xdcc8; break;
+		case 7: port_address = 0xdcd0; break;
+		case 8: port_address = 0xdcd8; break;
+		default: port_address = 0x3F8; break;
+    }
+    return(port_address);
+}
+
+int main(int argc, char *argv[])
+{
+    int port_address;		    // The serial port base I/O port address
+    unsigned char old_value;	// The original value of the MCR register
+    unsigned char new_value;	// The new value of the MCR register
+    unsigned char value;		// The specified state ON or OFF
+//    unsigned char ctrl_line;	// The specified line to ctrl (DTR or RTS)
+
+    debug = ON;
+    verbose = OFF;
+    quiet = OFF;
+	level = 0;
+	numlines = ERROR;
+
+    devicename = strdup(DEF_DEVICENAME);
+    linename = strdup(DEF_LINENAME);
+    cfgfile = strdup(DEF_CFGFILE);
+    port_number = DEF_PORTNUM;
+
+	/* start with 'DTR only' control assigned */
+    ctrl_line = CTRL_DTR;
+
 	if (debug)
 	{
 		printf("Port Number: %d\n",port_number);
+		printf("Ctrl Line: '%s' (%d)\n",getCtrlLineName(ctrl_line),ctrl_line);
 		printf("devicename: '%s'\n",devicename);
 		printf("linename: '%s'\n",linename);
 		printf("cfgfile: '%s'\n",cfgfile);
 	}
 
-	exit(0);
+	if (!quiet)
+	{
+    	prt_hdr(argv[0]);
+    	copyright();
+	}
+
+	/* Load defaults from ini config file */
+	load_config(cfgfile);
+
+	/* Parse command line arguments */
+	parse_args(argc,argv);
+
+	if (debug)
+	{
+		printf("Port Number: %d\n",port_number);
+		printf("Ctrl Line: '%s' (%d)\n",getCtrlLineName(ctrl_line),ctrl_line);
+		printf("devicename: '%s'\n",devicename);
+		printf("linename: '%s'\n",linename);
+		printf("cfgfile: '%s'\n",cfgfile);
+	}
+
+	//exit(0);
 //    /* Ensure that the user has supplied exactly three parameters
 //     * (argc = 4) supplied to the program on the command line. If not,
 //     * then print usage and exit.
@@ -443,19 +561,7 @@ int main(int argc, char *argv[])
      * of the serial port to be controlled. Any thing other that
      * 0-3 may not work and is dependant on specific hardware.
      */
-    switch (port_number)
-    {
-		case 0: port_address = 0x3F8; break;
-		case 1: port_address = 0x2F8; break;
-		case 2: port_address = 0x3E8; break;
-		case 3: port_address = 0x2E8; break;
-		case 4: port_address = 0xec98; break;
-		case 5: port_address = 0xdcc0; break;
-		case 6: port_address = 0xdcc8; break;
-		case 7: port_address = 0xdcd0; break;
-		case 8: port_address = 0xdcd8; break;
-		default: port_address = 0x3F8; break;
-    }
+	port_address = getPortAddress(port_number);
 
 	/* Setup the default control pin BIT map */
     switch(ctrl_line)
@@ -651,7 +757,4 @@ int main(int argc, char *argv[])
     /* Peace, out! */
     exit(0);
 }
-
-
-
 

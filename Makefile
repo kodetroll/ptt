@@ -15,9 +15,9 @@ OBJS=ptt.o ini.o
 %.o: %.c $(DEPS)
 	$(CC) -c -o $@ $< $(CFLAGS)
 
-all: ptt 
+all: clean ptt 
 
-ptt:	$(OBJS)
+ptt: $(OBJS)
 	$(CC) -o $@ $^ $(CFLAGS) $(LIBS) $(LDFLAGS)
 
 .PHONY: clean
@@ -25,8 +25,8 @@ ptt:	$(OBJS)
 clean:
 	rm -rf *.o
 
-cleanall:
-	rm -rf *.o ptt	
+cleanall: clean
+	rm -rf ptt	
 
 install:
 	install ptt /usr/local/sbin

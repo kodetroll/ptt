@@ -49,7 +49,60 @@
 
 #include "ptt.h"
 
+static int verbose;			// Verbose Reporting {0|1} {OFF|ON}
+static int quiet;			// Silent Output {0|1} {OFF|ON}
+static int debug;			// Debug reporting {0|1} {OFF|ON}
+static int level;			// Debug level {0|5}
+int port_number;            // The specified serial port number 0-3
+unsigned char ctrl_line;	// The specified line to ctrl (DTR or RTS)
+int numlines;				// Number of lines to control
+char * devicename;			// serial device name
+char * linename;			// serial line name
+char * cfgfile;				// Config file name
+unsigned char value;		// The specified state ON or OFF
+
 configuration config;
+
+int load_defaults(void)
+{
+    if (debug)
+    	printf("load_defaults()!\n");
+
+    debug = ON;
+    verbose = OFF;
+    quiet = OFF;
+	level = 0;
+	numlines = ERROR;
+	value = DEF_VALUE;
+
+    devicename = strdup(DEF_DEVICENAME);
+    linename = strdup(DEF_LINENAME);
+    cfgfile = strdup(DEF_CFGFILE);
+    port_number = DEF_PORTNUM;
+
+
+	/* start with 'DTR only' control assigned */
+    ctrl_line = CTRL_DTR;
+
+	if (debug)
+	{
+		printf("default: \n");
+		printf("  debug: %d\n", debug);
+		printf("  verbose: %d\n", verbose);
+		printf("  level: %d\n", level);
+		printf("  quiet: %d\n", quiet);
+		printf("  port_number: %d\n", port_number);
+		printf("  value: %d\n", value);
+		printf("  ctrl_line: '%s' (%d)\n",getCtrlLineName(ctrl_line), ctrl_line);
+		printf("  numlines: %d\n", numlines);
+
+		printf("  devicename: '%s'\n", devicename);
+		printf("  linename: '%s'\n", linename);
+		printf("  cfgfile: '%s'\n", cfgfile);
+		printf("  port_number: %d\n", port_number);
+	}
+
+}
 
 /* This function will match section and name to sets specified below to parse
  * an ini file line into it's value. This value is stored in the configuration*
@@ -87,6 +140,9 @@ static int handler(void* user, const char* section, const char* name, const char
 /* This function accomplishes the loading of the ini file into the configuration */
 int load_config(char * cfile)
 {
+    if (debug)
+    	printf("load_config()!\n");
+
 //	configuration config;
 	char * p;
 
@@ -96,6 +152,22 @@ int load_config(char * cfile)
 	}
 	printf("Config loaded from '%s':\n", cfile);
 
+	if (debug)
+	{
+		printf("config: \n");
+		printf("  debug: %d\n", config.debug);
+		printf("  verbose: %d\n", config.verbose);
+		printf("  level: %d\n", config.level);
+		printf("  quiet: %d\n", config.quiet);
+		printf("  port_number: %d\n", config.port_number);
+		printf("  value: %d\n", config.value);
+		printf("  ctrl_line: '%s' (%d)\n", getCtrlLineName(config.ctrl_line), config.ctrl_line);
+		printf("  numlines: %d\n", config.numlines);
+
+		printf("  devicename: '%s'\n", config.devicename);
+		printf("  linename: '%s'\n", config.linename);
+	}
+
 	//printf("name=%s\n", config.name);
 
 	debug = config.debug;
@@ -104,18 +176,18 @@ int load_config(char * cfile)
 	quiet = config.quiet;
 
 	if (config.devicename != "")
-		strcpy(devicename,config.devicename);
+		strcpy(devicename, config.devicename);
 
 	if (debug)
-		printf("devicename: '%s'\n",devicename);
+		printf("devicename: '%s'\n", devicename);
 
 	port_number = getPortNumber(devicename);
 
 	if (config.linename != "")
-		strcpy(linename,config.linename);
+		strcpy(linename, config.linename);
 
 	if (debug)
-		printf("linename: '%s'\n",linename);
+		printf("linename: '%s'\n", linename);
 
 	ctrl_line = getCtrlLine(linename);
 
@@ -123,19 +195,40 @@ int load_config(char * cfile)
 		port_number = config.port_number;
 
 	if (debug)
-		printf("port_number: '%d'\n",port_number);
+		printf("port_number: '%d'\n", port_number);
 
 	if (config.numlines != ERROR)
 		numlines = config.numlines;
 
 	if (debug)
-		printf("numlines: '%d'\n",numlines);
+		printf("numlines: '%d'\n", numlines);
 
 	if (config.ctrl_line != ERROR)
 		ctrl_line = config.ctrl_line;
 
 	if (debug)
-		printf("ctrl_line: '%d'\n",ctrl_line);
+		printf("  ctrl_line: '%s' (%d)\n",getCtrlLineName(ctrl_line), ctrl_line);
+
+	if (config.value != value)
+		value = config.value;
+
+	if (debug)
+	{
+		printf("program: \n");
+		printf("  debug: %d\n", debug);
+		printf("  verbose: %d\n", verbose);
+		printf("  level: %d\n", level);
+		printf("  quiet: %d\n", quiet);
+		printf("  port_number: %d\n", port_number);
+		printf("  value: %d\n", value);
+		printf("  ctrl_line: '%s' (%d)\n",getCtrlLineName(ctrl_line), ctrl_line);
+		printf("  numlines: %d\n", numlines);
+
+		printf("  devicename: '%s'\n", devicename);
+		printf("  linename: '%s'\n", linename);
+		printf("  cfgfile: '%s'\n", cfgfile);
+		printf("  port_number: %d\n", port_number);
+	}
 
 	return(PASS);
 }
@@ -189,6 +282,9 @@ void parse_args(int argc, char *argv[])
 {
     int chopt;
     char * valstr;
+
+    if (debug)
+    	printf("parse_args()\n");
 
 	while (1)
 	{
@@ -271,7 +367,7 @@ void parse_args(int argc, char *argv[])
 			case 's':
 				if (debug)
 					printf ("option '-%c' with value '%s'\n", chopt, optarg);
-				value = atoi(optarg);
+				value = atoi(optarg) & 0x01;
 				break;
 
 			case '?':
@@ -304,11 +400,11 @@ void parse_args(int argc, char *argv[])
 //		putchar ('\n');
 		if (debug)
 			printf("valstr: '%s'\n",valstr);
-		value = atoi(valstr);
+		value = atoi(valstr) & 0x01;
 	}
 
 	if (debug)
-		printf("value: '%d'\n",value);
+		printf("value: %d\n",value);
 
 }
 
@@ -402,33 +498,20 @@ int main(int argc, char *argv[])
     unsigned char old_value;	// The original value of the MCR register
     unsigned char new_value;	// The new value of the MCR register
 
-//    unsigned char ctrl_line;	// The specified line to ctrl (DTR or RTS)
-
-    debug = ON;
-    verbose = OFF;
-    quiet = OFF;
-	level = 0;
-	numlines = ERROR;
-	value = OFF;
-
-    devicename = strdup(DEF_DEVICENAME);
-    linename = strdup(DEF_LINENAME);
-    cfgfile = strdup(DEF_CFGFILE);
-    port_number = DEF_PORTNUM;
-
-	/* start with 'DTR only' control assigned */
-    ctrl_line = CTRL_DTR;
+	/* Load the defaults into global config variables */
+	load_defaults();
 
 	if (debug)
 	{
-		printf("Port Number: %d\n",port_number);
-		printf("Ctrl Line: '%s' (%d)\n",getCtrlLineName(ctrl_line),ctrl_line);
-		printf("devicename: '%s'\n",devicename);
-		printf("linename: '%s'\n",linename);
-		printf("value: '%d'\n",value);
-		printf("cfgfile: '%s'\n",cfgfile);
+		printf("Port Number: %d\n", port_number);
+		printf("Ctrl Line: '%s' (%d)\n", getCtrlLineName(ctrl_line), ctrl_line);
+		printf("devicename: '%s'\n", devicename);
+		printf("linename: '%s'\n", linename);
+		printf("value: %d\n", value);
+		printf("cfgfile: '%s'\n", cfgfile);
 	}
 
+	/* Print the program header and copyright banners, unless quiet mode selected */
 	if (!quiet)
 	{
     	prt_hdr(argv[0]);
@@ -443,11 +526,29 @@ int main(int argc, char *argv[])
 
 	if (debug)
 	{
-		printf("Port Number: %d\n",port_number);
-		printf("Ctrl Line: '%s' (%d)\n",getCtrlLineName(ctrl_line),ctrl_line);
-		printf("devicename: '%s'\n",devicename);
-		printf("linename: '%s'\n",linename);
-		printf("cfgfile: '%s'\n",cfgfile);
+		printf("main: \n");
+		printf("  debug: %d\n", debug);
+		printf("  verbose: %d\n", verbose);
+		printf("  level: %d\n", level);
+		printf("  quiet: %d\n", quiet);
+		printf("  port_number: %d\n", port_number);
+		printf("  value: %d\n", value);
+		printf("  ctrl_line: '%s' (%d)\n",getCtrlLineName(ctrl_line), ctrl_line);
+		printf("  numlines: %d\n", numlines);
+
+		printf("  devicename: '%s'\n", devicename);
+		printf("  linename: '%s'\n", linename);
+		printf("  cfgfile: '%s'\n", cfgfile);
+		printf("  port_number: %d\n", port_number);
+	}
+
+	if (debug)
+	{
+		printf("Port Number: %d\n", port_number);
+		printf("Ctrl Line: '%s' (%d)\n", getCtrlLineName(ctrl_line), ctrl_line);
+		printf("devicename: '%s'\n", devicename);
+		printf("linename: '%s'\n", linename);
+		printf("cfgfile: '%s'\n", cfgfile);
 	}
 
 	//exit(0);
@@ -521,6 +622,7 @@ int main(int argc, char *argv[])
 		if ((old_value & UPPER_MCR_MASK) > 0)
 			printf("Warning, MCR Initial Value indicates no UART present\n");
 
+	/* Show line state of port prior to changing */
     switch(ctrl_line)
     {
         case CTRL_NONE:
@@ -542,10 +644,10 @@ int main(int argc, char *argv[])
     }
     printf("\n");
 
-    /* Generate a boolean value from the operator
-     * supplied input value
-     */
-    value = atoi( argv[3]) & 0x01;
+//    /* Generate a boolean value from the operator
+//     * supplied input value
+//     */
+//    value = atoi( argv[3]) & 0x01;
 
     /* Show this to the operator */
     if (verbose)

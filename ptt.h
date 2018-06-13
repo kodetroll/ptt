@@ -87,39 +87,16 @@ int MCR_ADDR_OFFSET = 0x04;
 //int IO_MASK = 0x3FF;
 int IO_MASK = 0xFFFF;
 
-#define DEF_DEVICENAME "/dev/ttyS0"
-#define DEF_LINENAME "BOTH"
-#define DEF_CFGFILE "ptt.conf"
-#define DEF_PORTNUM 0
+#define DEF_DEVICENAME 	"/dev/ttyS0"
+#define DEF_LINENAME 	"BOTH"
+#define DEF_CFGFILE 	"ptt.conf"
+#define DEF_PORTNUM 	0
+#define DEF_VALUE 		OFF
 
-#define MINOR_VER 3
-#define MAJOR_VER 1
-#define COPY_YEARS "2009-2015"
 
-static int verbose;			// Verbose Reporting {0|1} {OFF|ON}
-static int quiet;			// Silent Output {0|1} {OFF|ON}
-static int debug;			// Debug reporting {0|1} {OFF|ON}
-static int level;			// Debug level {0|5}
-int port_number;            // The specified serial port number 0-3
-unsigned char ctrl_line;	// The specified line to ctrl (DTR or RTS)
-int numlines;				// Number of lines to control
-char * devicename;			// serial device name
-char * linename;			// serial line name
-char * cfgfile;				// Config file name
-unsigned char value;		// The specified state ON or OFF
-
-// Global Prototypes
-static int handler(void* user, const char* section, const char* name, const char* value);
-int load_config(char * cfile);
-void prt_hdr(char * name);
-void copyright(void);
-void version(char * name);
-void usage(char * name);
-void print_line_state(int bit_mask, int value);
-void parse_args(int argc, char *argv[]);
-char * getCtrlLineName(int cline);
-int getCtrlLine(char * line);
-int getPortNumber(char * portname);
+#define MAJOR_VER 		1
+#define MINOR_VER 		3
+#define COPY_YEARS 		"2009-2018"
 
 typedef struct
 {
@@ -137,6 +114,19 @@ typedef struct
 } configuration;
 
 
+// Global Prototypes
+int load_defaults(void);
+static int handler(void* user, const char* section, const char* name, const char* value);
+int load_config(char * cfile);
+void prt_hdr(char * name);
+void copyright(void);
+void version(char * name);
+void usage(char * name);
+void print_line_state(int bit_mask, int value);
+void parse_args(int argc, char *argv[]);
+char * getCtrlLineName(int cline);
+int getCtrlLine(char * line);
+int getPortNumber(char * portname);
 
 
 #ifdef __cplusplus

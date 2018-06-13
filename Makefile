@@ -10,14 +10,18 @@ CFLAGS=-O1
 LDFLAGS=
 LIBS=
 DEPS=
-OBJS=ptt.o ini.o
+PROJ=ptt
+OBJS=$(PROJ).o ini.o
+WHAT=$(PROJ)
+#WHERE=/usr/local/sbin
+WHERE=~/bin
 
 %.o: %.c $(DEPS)
 	$(CC) -c -o $@ $< $(CFLAGS)
 
-all: clean ptt 
+all: clean $(PROJ) 
 
-ptt: $(OBJS)
+$(PROJ): $(OBJS)
 	$(CC) -o $@ $^ $(CFLAGS) $(LIBS) $(LDFLAGS)
 
 .PHONY: clean
@@ -26,7 +30,7 @@ clean:
 	rm -rf *.o
 
 cleanall: clean
-	rm -rf ptt	
+	rm -rf $(PROJ)	
 
 install:
-	install ptt /usr/local/sbin
+	install $(WHAT) $(WHERE)

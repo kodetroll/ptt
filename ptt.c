@@ -142,6 +142,7 @@ int numlines;				// Number of lines to control
 char * devicename;			// serial device name
 char * linename;			// serial line name
 char * cfgfile;				// Config file name
+unsigned char value;		// The specified state ON or OFF
 
 // Global Prototypes
 static int handler(void* user, const char* section, const char* name, const char* value);
@@ -272,20 +273,29 @@ void copyright(void)
 
 void version(char * name)
 {
-    printf("This %s Version %d.%d (C) %s\n",name,MAJOR_VER,MINOR_VER,COPY_YEARS);
+    printf("This %s Version %d.%d (C) %s\n", name, MAJOR_VER, MINOR_VER, COPY_YEARS);
 }
 
 void usage(char * name)
 {
 	printf("\n");
-	printf("Usage is %s [options] <value>\n",name);
+	printf("Usage is %s [options] <value>\n", name);
 	printf("\n");
 	printf("Where:\n");
+	printf("  --verbose                   Turn ON verbose reporting.\n");
+	printf("  --brief                     Turn OFF verbose reporting.\n");
+	printf("  --debug                     Turn ON debug reporting.\n");
+	printf("  --nodebug                   Turn OFF debug reporting.\n");
+	printf("  --quiet                     Turn ON quiet mode.\n");
+	printf("  --unquiet                   Turn OFF quiet mode.\n");
+	printf("  --help, -h                  Show version info and exit.\n");
+	printf("  --version, -v               Show version info and exit.\n");
 	printf("  --port, -p <port>           Serial port number [0-7]\n");
 	printf("  --device, -d  <devicename>  Serial device name, e.g '/dev/ttyS0'\n");
 	printf("  --line, -l <ctrl_line>      Line to control [NONE, DTR, RTS, BOTH] \n");
 	printf("  --file, -f <config file>    Use alternate config file\n");
-    printf("  <value> is '0' or '1' for ON or OFF\n") ;
+	printf("  --set, -s <value>           Specify new state value ['0','1'] \n") ;
+	printf("  <value> is '0' or '1' for ON or OFF\n") ;
 }
 
 void print_line_state(int bit_mask, int value)
@@ -298,79 +308,91 @@ void print_line_state(int bit_mask, int value)
 
 void parse_args(int argc, char *argv[])
 {
-    int c;
+    int chopt;
+    char * valstr;
 
 	while (1)
 	{
 		static struct option long_options[] =
 		{
 			/* These options set a flag. */
-			{"verbose", no_argument,   &verbose, 1},
-			{"brief",   no_argument,   &verbose, 0},	// default
-			{"debug",   no_argument,     &debug, 1},
-			{"nodebug",   no_argument,   &debug, 0},	// default
-			{"quiet",   no_argument,     &quiet, 1},
-			{"unquiet", no_argument,     &quiet, 0},	// default
-			/* These options don’t set a flag.
+			{"verbose",		no_argument,		&verbose, 1},
+			{"brief",		no_argument,		&verbose, 0},	// default
+			{"debug",		no_argument,		  &debug, 1},
+			{"nodebug",		no_argument,		  &debug, 0},	// default
+			{"quiet",		no_argument,		  &quiet, 1},
+			{"unquiet",		no_argument,		  &quiet, 0},	// default
+			/* These options don't set a flag.
 			   We distinguish them by their indices. */
-			{"help",     no_argument,       0, 'h'},
-			{"version",  no_argument,       0, 'v'},
-			{"device",   required_argument, 0, 'd'},
-			{"port",     required_argument, 0, 'p'},
-			{"line",     required_argument, 0, 'l'},
-			{"file",     required_argument, 0, 'f'},
+			{"help",		no_argument,		0, 'h'},
+			{"version",		no_argument,		0, 'v'},
+			{"device",		required_argument,	0, 'd'},
+			{"port",		required_argument,	0, 'p'},
+			{"line",		required_argument,	0, 'l'},
+			{"file",		required_argument,	0, 'f'},
+			{"set",			required_argument,	0, 's'},
 			{0, 0, 0, 0}
 		};
 		/* getopt_long stores the option index here. */
 		int option_index = 0;
 
-		c = getopt_long (argc, argv, "hvd:p:l:f:",
+		chopt = getopt_long (argc, argv, "hvd:p:l:f:s:",
 				long_options, &option_index);
 
 		/* Detect the end of the options. */
-		if (c == -1)
+		if (chopt == -1)
 			break;
 
-		switch (c)
+		switch (chopt)
 		{
 			case 0:
 				/* If this option set a flag, do nothing else now. */
 				if (long_options[option_index].flag != 0)
 					break;
-				printf ("option %s", long_options[option_index].name);
+				printf ("option '%s'", long_options[option_index].name);
 				if (optarg)
-					printf (" with arg %s", optarg);
+					printf (" with arg '%s'", optarg);
 				printf ("\n");
-				break;
-
-			case 'v':
-				version(argv[0]);
-				exit(1);
 				break;
 
 			case 'h':
 				usage(argv[0]);
-				exit(1);
+				exit(0);
+				break;
+
+			case 'v':
+				version(argv[0]);
+				exit(0);
 				break;
 
 			case 'd':
-				printf ("option -d with value `%s'\n", optarg);
+				if (debug)
+					printf ("option '-%c' with value '%s'\n", chopt, optarg);
 				devicename = strdup(optarg);
 				break;
 
 			case 'p':
-				printf ("option -p with value `%s'\n", optarg);
+				if (debug)
+					printf ("option '-%c' with value '%s'\n", chopt, optarg);
 				port_number = atoi(optarg);
 				break;
 
 			case 'l':
-				printf ("option -l with value `%s'\n", optarg);
+				if (debug)
+					printf ("option '-%c' with value '%s'\n", chopt, optarg);
 				linename = strdup(optarg);
 				break;
 
 			case 'f':
-				printf ("option -f with value `%s'\n", optarg);
+				if (debug)
+					printf ("option '-%c' with value '%s'\n", chopt, optarg);
 				cfgfile = strdup(optarg);
+				break;
+
+			case 's':
+				if (debug)
+					printf ("option '-%c' with value '%s'\n", chopt, optarg);
+				value = atoi(optarg);
 				break;
 
 			case '?':
@@ -382,9 +404,9 @@ void parse_args(int argc, char *argv[])
 		}
 	}
 
-	/* Instead of reporting ‘--verbose’
-	and ‘--brief’ as they are encountered,
-	we report the final status resulting from them. */
+	/* Instead of reporting '--verbose'
+	   and '--brief' as they are encountered,
+	   we report the final status resulting from them. */
 	if (verbose)
 		puts ("verbose flag is set");
 	if (quiet)
@@ -395,11 +417,19 @@ void parse_args(int argc, char *argv[])
 	/* Print any remaining command line arguments (not options). */
 	if (optind < argc)
 	{
-		printf ("non-option ARGV-elements: ");
+		memset(valstr,0x00,sizeof(valstr));
+//		printf ("non-option ARGV-elements: ");
 		while (optind < argc)
-			printf ("%s ", argv[optind++]);
-		putchar ('\n');
+			strcat(valstr, argv[optind++]);
+//			printf ("%s ", argv[optind++]);
+//		putchar ('\n');
+		if (debug)
+			printf("valstr: '%s'\n",valstr);
+		value = atoi(valstr);
 	}
+
+	if (debug)
+		printf("value: '%d'\n",value);
 
 }
 
@@ -492,7 +522,7 @@ int main(int argc, char *argv[])
     int port_address;		    // The serial port base I/O port address
     unsigned char old_value;	// The original value of the MCR register
     unsigned char new_value;	// The new value of the MCR register
-    unsigned char value;		// The specified state ON or OFF
+
 //    unsigned char ctrl_line;	// The specified line to ctrl (DTR or RTS)
 
     debug = ON;
@@ -500,6 +530,7 @@ int main(int argc, char *argv[])
     quiet = OFF;
 	level = 0;
 	numlines = ERROR;
+	value = OFF;
 
     devicename = strdup(DEF_DEVICENAME);
     linename = strdup(DEF_LINENAME);
@@ -515,6 +546,7 @@ int main(int argc, char *argv[])
 		printf("Ctrl Line: '%s' (%d)\n",getCtrlLineName(ctrl_line),ctrl_line);
 		printf("devicename: '%s'\n",devicename);
 		printf("linename: '%s'\n",linename);
+		printf("value: '%d'\n",value);
 		printf("cfgfile: '%s'\n",cfgfile);
 	}
 
@@ -574,21 +606,21 @@ int main(int argc, char *argv[])
 
     /* Show the BASE COM Port address based on the port number */
     if (verbose)
-        printf("COMM Port base address: 0x%024X\n",port_address);
+        printf("COM Port base address: 0x%024X\n",port_address);
 
     /* Add the MCR OFFSET to BASE address to find the MCR address */
     port_address += MCR_ADDR_OFFSET;
 
     /* Show the MCR register Address */
     if (verbose)
-        printf("COMM Port MCR Register address: 0x%02X\n",port_address);
+        printf("COM Port MCR Register address: 0x%02X\n",port_address);
 
     /* Apply the IO MASK to generate the final IO address */
     port_address &= IO_MASK;
 
     /* Show the final MCR Register address */
     if (verbose)
-        printf("COMM Port MCR Register address: 0x%02X\n",port_address);
+        printf("COM Port MCR Register address: 0x%02X\n",port_address);
 
     /* If the port_address is less than 0x3FF, then we do a simple ioperm()
      * action to set the perms on the ioport so that the user can change
